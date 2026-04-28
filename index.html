@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UK Singing Grades 7 &amp; 8 — Repertoire Browser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>UK Singing Grades — Repertoire Browser</h1>
+  <p class="sub">ABRSM &amp; Trinity, Grades 7 &amp; 8. Data extracted locally from syllabus PDFs.</p>
+</header>
+
+<section class="controls">
+  <div class="row">
+    <label class="grow">
+      <span>Search</span>
+      <input id="q" type="search" placeholder="title or composer">
+    </label>
+    <label>
+      <span>Board</span>
+      <select id="board"><option value="">All</option><option>ABRSM</option><option>Trinity</option></select>
+    </label>
+    <label>
+      <span>Grade</span>
+      <select id="grade"><option value="">All</option><option>7</option><option>8</option></select>
+    </label>
+    <label>
+      <span>List</span>
+      <select id="list"><option value="">All</option></select>
+    </label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="rangeOn"> Fits my voice</label>
+    <label><span>Low</span><input id="low" type="text" placeholder="e.g. c or C4" size="6"></label>
+    <label><span>High</span><input id="high" type="text" placeholder="e.g. g'' or G5" size="6"></label>
+    <span id="rangeHint" class="hint"></span>
+    <label class="grow">
+      <span>Sort</span>
+      <select id="sort">
+        <option value="title">Title</option>
+        <option value="composer">Composer</option>
+        <option value="min_range_low_midi">Lowest note</option>
+        <option value="max_range_high_midi">Highest note</option>
+        <option value="width">Range width</option>
+        <option value="list">List</option>
+        <option value="grade">Grade</option>
+      </select>
+      <select id="dir"><option value="asc">Asc</option><option value="desc">Desc</option></select>
+    </label>
+    <button id="reset" type="button">Reset</button>
+  </div>
+  <div class="row">
+    <button id="openAdv" type="button">Advanced filters <span id="advBadge" class="badge" hidden>0</span></button>
+  </div>
+  <div id="summary" class="summary"></div>
+</section>
+
+<table id="results">
+  <thead>
+    <tr>
+      <th>Title</th><th>Composer</th><th>Board</th><th>Grade</th>
+      <th>List</th><th>Key(s)</th><th>Range</th>
+      <th class="icon">▶</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<dialog id="advanced">
+  <form method="dialog" class="adv">
+    <h2>Advanced filters</h2>
+
+    <div class="adv-grid">
+      <fieldset>
+        <legend>Composer</legend>
+        <div id="advComposerChips" class="chips"></div>
+        <input type="search" class="multi-filter" data-target="advComposer" placeholder="filter…">
+        <div id="advComposer" class="multi"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>List title</legend>
+        <input type="search" class="multi-filter" data-target="advListTitle" placeholder="filter…">
+        <div id="advListTitle" class="multi"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Key (per edition)</legend>
+        <input type="search" class="multi-filter" data-target="advKey" placeholder="filter…">
+        <div id="advKey" class="multi"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Language (per edition)</legend>
+        <input type="search" class="multi-filter" data-target="advLang" placeholder="filter…">
+        <div id="advLang" class="multi"></div>
+      </fieldset>
+    </div>
+
+    <fieldset class="adv-numeric">
+      <legend>Range constraints</legend>
+      <label>Max width <input id="advMaxWidth" type="number" min="0" step="1" size="4"> semitones</label>
+      <label>Lowest note ≥ <input id="advLoMin" type="text" size="6" placeholder="e.g. c"></label>
+      <label>Highest note ≤ <input id="advHiMax" type="text" size="6" placeholder="e.g. g''"></label>
+      <label><input id="advHasRange" type="checkbox"> Hide rows with no parsed range</label>
+    </fieldset>
+
+    <div class="adv-buttons">
+      <button id="advClear" type="button">Clear advanced</button>
+      <button value="close">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="books.js"></script>
+<script src="songs.js"></script>
+<script>
+const PITCH_CLASS = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+
+function pitchToMidi(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  s = s.replace(/♯/g, "#").replace(/♭/g, "b").replace(/[’]/g, "'");
+  let m = s.match(/^([A-Ga-g])([#b]?)(-?\d+)$/);
+  if (m) {
+    const letter = m[1].toUpperCase(), acc = m[2], octave = parseInt(m[3], 10);
+    const st = PITCH_CLASS[letter] + (acc === "#" ? 1 : acc === "b" ? -1 : 0);
+    return (octave + 1) * 12 + st;
+  }
+  m = s.match(/^([A-Ga-g])([#b]?)('*|,*)$/);
+  if (m) {
+    const letter = m[1], acc = m[2], marks = m[3];
+    const isLower = letter === letter.toLowerCase();
+    const base = isLower ? 3 : 2;
+    let oct = base;
+    if (marks.startsWith("'")) oct = base + marks.length;
+    else if (marks.startsWith(",")) oct = base - marks.length;
+    const st = PITCH_CLASS[letter.toUpperCase()] + (acc === "#" ? 1 : acc === "b" ? -1 : 0);
+    return (oct + 1) * 12 + st;
+  }
+  return null;
+}
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+function midiToHelmholtz(midi) {
+  if (midi == null) return "";
+  const oct = Math.floor(midi / 12) - 1;
+  const name = NOTE_NAMES[midi % 12];
+  if (oct >= 3) {
+    const marks = "'".repeat(oct - 3);
+    return name.toLowerCase() + marks;
+  } else {
+    const marks = ",".repeat(2 - oct);
+    return name + marks;
+  }
+}
+
+function splitKeys(k) {
+  if (!k) return [];
+  return k.replace(/♭/g, "b").replace(/♯/g, "#")
+    .split(/\s*(?:,| or )\s*/i)
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+function splitLangs(l) {
+  if (!l) return [];
+  return l.split("/").map(x => x.trim()).filter(Boolean);
+}
+
+const SONGS = window.SONGS || [];
+const BOOKS = window.BOOKS || [];
+const BOOK_BY_ID = Object.fromEntries(BOOKS.map(b => [b.id, b]));
+
+const SONG_WIDTH = {};
+for (const s of SONGS) {
+  if (s.min_range_low_midi != null && s.max_range_high_midi != null) {
+    SONG_WIDTH[s.id] = s.max_range_high_midi - s.min_range_low_midi;
+  } else {
+    SONG_WIDTH[s.id] = null;
+  }
+}
+
+const COMPOSERS  = uniqSorted(SONGS.map(s => s.composer).filter(Boolean));
+const LIST_TITLES = uniqSorted(SONGS.map(s => s.list_title).filter(Boolean));
+const KEYS       = uniqSorted(SONGS.flatMap(s => s.editions.flatMap(e => splitKeys(e.key))));
+const LANGS      = uniqSorted(SONGS.flatMap(s => s.editions.flatMap(e => splitLangs(e.languages))));
+
+function uniqSorted(arr) {
+  return Array.from(new Set(arr)).sort((a, b) => a.localeCompare(b));
+}
+
+const state = {
+  q: "", board: "", grade: "", list: "",
+  rangeOn: false, low: "", high: "",
+  sort: "title", dir: "asc",
+  composers: new Set(),
+  listTitles: new Set(),
+  keys: new Set(),
+  langs: new Set(),
+  maxWidth: "",
+  loMin: "",
+  hiMax: "",
+  hasRange: false,
+  openIds: new Set(),
+};
+
+function populateListOptions() {
+  const sel = document.getElementById("list");
+  const lists = uniqSorted(SONGS.map(s => s.list).filter(Boolean));
+  for (const l of lists) {
+    const o = document.createElement("option");
+    o.value = l; o.textContent = l;
+    sel.appendChild(o);
+  }
+}
+
+function apply(rows) {
+  let out = rows.slice();
+
+  if (state.q) {
+    const q = state.q.toLowerCase();
+    out = out.filter(r =>
+      (r.title || "").toLowerCase().includes(q) ||
+      (r.composer || "").toLowerCase().includes(q)
+    );
+  }
+  if (state.board) out = out.filter(r => r.board === state.board);
+  if (state.grade) out = out.filter(r => String(r.grade) === state.grade);
+  if (state.list)  out = out.filter(r => r.list === state.list);
+
+  const hint = document.getElementById("rangeHint");
+  hint.textContent = "";
+  if (state.rangeOn) {
+    const lo = pitchToMidi(state.low), hi = pitchToMidi(state.high);
+    if (lo == null && hi == null) {
+      hint.textContent = "enter low and/or high";
+    } else if (lo != null && hi != null && lo > hi) {
+      hint.textContent = "low is above high";
+    } else {
+      out = out.filter(r => r.editions.some(e =>
+        e.range_low_midi != null && e.range_high_midi != null &&
+        (lo == null || e.range_low_midi  >= lo) &&
+        (hi == null || e.range_high_midi <= hi)
+      ));
+    }
+  }
+
+  if (state.composers.size)  out = out.filter(r => state.composers.has(r.composer));
+  if (state.listTitles.size) out = out.filter(r => state.listTitles.has(r.list_title));
+  if (state.keys.size) {
+    out = out.filter(r => r.editions.some(e => splitKeys(e.key).some(k => state.keys.has(k))));
+  }
+  if (state.langs.size) {
+    out = out.filter(r => r.editions.some(e => splitLangs(e.languages).some(l => state.langs.has(l))));
+  }
+
+  if (state.maxWidth !== "" && Number.isFinite(+state.maxWidth)) {
+    const mw = +state.maxWidth;
+    out = out.filter(r => SONG_WIDTH[r.id] != null && SONG_WIDTH[r.id] <= mw);
+  }
+  const loMin = pitchToMidi(state.loMin);
+  const hiMax = pitchToMidi(state.hiMax);
+  if (loMin != null) out = out.filter(r => r.min_range_low_midi != null && r.min_range_low_midi >= loMin);
+  if (hiMax != null) out = out.filter(r => r.max_range_high_midi != null && r.max_range_high_midi <= hiMax);
+
+  if (state.hasRange) {
+    out = out.filter(r => r.min_range_low_midi != null && r.max_range_high_midi != null);
+  }
+
+  const k = state.sort, d = state.dir === "asc" ? 1 : -1;
+  out.sort((a, b) => {
+    let av = sortValue(a, k), bv = sortValue(b, k);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "string") { av = av.toLowerCase(); bv = String(bv).toLowerCase(); }
+    return av < bv ? -d : av > bv ? d : 0;
+  });
+
+  return out;
+}
+
+function sortValue(s, k) {
+  if (k === "width") return SONG_WIDTH[s.id];
+  return s[k];
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])
+  );
+}
+function searchLink(href, label, title) {
+  const t = title ? ` title="${esc(title)}"` : "";
+  return `<a href="${esc(href)}" target="_blank" rel="noopener"${t}>${esc(label)}</a>`;
+}
+
+function songRange(s) {
+  const lo = s.min_range_low_midi, hi = s.max_range_high_midi;
+  if (lo == null && hi == null) return "—";
+  const loStr = pickRangeString(s, "low",  lo);
+  const hiStr = pickRangeString(s, "high", hi);
+  const w = SONG_WIDTH[s.id];
+  return `${esc(loStr)}–${esc(hiStr)}${w != null ? ` <span class="muted">(${w} st)</span>` : ""}`;
+}
+function pickRangeString(s, end, midi) {
+  for (const e of s.editions) {
+    if (end === "low"  && e.range_low_midi  === midi && e.range_low)  return e.range_low;
+    if (end === "high" && e.range_high_midi === midi && e.range_high) return e.range_high;
+  }
+  return midiToHelmholtz(midi);
+}
+
+function songKeys(s) {
+  const ks = uniqSorted(s.editions.flatMap(e => splitKeys(e.key)));
+  if (ks.length === 0) return "";
+  if (ks.length <= 3)  return ks.join(", ");
+  return ks.slice(0, 3).join(", ") + "…";
+}
+
+function editionSearchUrl(song, ed) {
+  const parts = [`"${song.title}"`, `"${song.composer}"`];
+  if (ed.book) parts.push(ed.book);
+  if (ed.publisher_code) parts.push(ed.publisher_code);
+  return `https://www.google.com/search?q=${encodeURIComponent(parts.join(" "))}`;
+}
+
+function editionRangeText(ed) {
+  if (ed.range_low_midi == null && ed.range_high_midi == null) return "—";
+  const lo = ed.range_low  || midiToHelmholtz(ed.range_low_midi);
+  const hi = ed.range_high || midiToHelmholtz(ed.range_high_midi);
+  return `${lo}–${hi}`;
+}
+
+function renderEditions(s) {
+  if (!s.editions.length) return `<div class="ed-empty">No editions listed.</div>`;
+  return `<table class="editions-table"><thead><tr>
+      <th>Key</th><th>Range</th><th>Lang</th><th>Book / edition</th><th></th>
+    </tr></thead><tbody>${s.editions.map(ed => `
+      <tr>
+        <td class="nowrap">${esc(ed.key) || "—"}</td>
+        <td class="nowrap">${esc(editionRangeText(ed))}</td>
+        <td class="nowrap">${esc(ed.languages) || "—"}</td>
+        <td>${esc(ed.book) || "—"}${ed.publisher_code ? ` <span class="muted">(${esc(ed.publisher_code)})</span>` : ""}</td>
+        <td class="nowrap"><a class="find-btn" href="${esc(editionSearchUrl(s, ed))}" target="_blank" rel="noopener">🔍 Find a copy</a></td>
+      </tr>`).join("")}</tbody></table>`;
+}
+
+function render() {
+  const rows = apply(SONGS);
+  const tbody = document.querySelector("#results tbody");
+  tbody.innerHTML = rows.map(r => {
+    const q = encodeURIComponent(`${r.title} ${r.composer}`);
+    const open = state.openIds.has(r.id);
+    const chev = `<button type="button" class="chev" data-id="${esc(r.id)}" aria-expanded="${open}" aria-label="Toggle editions">${open ? "▾" : "▸"}</button>`;
+    const main = `<tr>
+      <td>${chev} ${esc(r.title)}</td>
+      <td>${esc(r.composer)}</td>
+      <td>${esc(r.board)}</td>
+      <td>${esc(r.grade)}</td>
+      <td>${esc(r.list)}</td>
+      <td class="nowrap">${esc(songKeys(r))}</td>
+      <td class="nowrap">${songRange(r)}</td>
+      <td class="icon">${searchLink(`https://www.youtube.com/results?search_query=${q}`, "▶", "Search YouTube")}</td>
+    </tr>`;
+    const detail = open ? `<tr class="editions"><td colspan="8">${renderEditions(r)}</td></tr>` : "";
+    return main + detail;
+  }).join("");
+
+  const summary = document.getElementById("summary");
+  if (SONGS.length === 0) {
+    summary.innerHTML = `No songs loaded yet. Drop syllabus PDFs in <code>pdfs/</code> and run <code>python3 scripts/parse_pdfs.py</code> — see <a href="README.md">README.md</a>.`;
+  } else if (rows.length === 0) {
+    summary.textContent = `No songs match these filters — try Reset.`;
+  } else {
+    summary.textContent = `${rows.length} of ${SONGS.length} songs`;
+  }
+
+  updateAdvBadge();
+}
+
+function activeAdvCount() {
+  let n = 0;
+  if (state.composers.size)  n++;
+  if (state.listTitles.size) n++;
+  if (state.keys.size)       n++;
+  if (state.langs.size)      n++;
+  if (state.maxWidth !== "") n++;
+  if (state.loMin)           n++;
+  if (state.hiMax)           n++;
+  if (state.hasRange)        n++;
+  return n;
+}
+function updateAdvBadge() {
+  const n = activeAdvCount();
+  const b = document.getElementById("advBadge");
+  b.textContent = n;
+  b.hidden = n === 0;
+}
+
+// ---------- multi-select pickers ----------
+function buildMulti(targetId, items, stateSet, opts = {}) {
+  const root = document.getElementById(targetId);
+  const chipsEl = opts.chipsId ? document.getElementById(opts.chipsId) : null;
+  function paint() {
+    root.innerHTML = items.map(v => {
+      const checked = stateSet.has(v) ? " checked" : "";
+      return `<label class="multi-row"><input type="checkbox" value="${esc(v)}"${checked}> ${esc(v) || "<em>(blank)</em>"}</label>`;
+    }).join("");
+    if (chipsEl) {
+      chipsEl.innerHTML = Array.from(stateSet).sort().map(v =>
+        `<span class="chip">${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="remove">×</button></span>`
+      ).join("");
+    }
+  }
+  root.addEventListener("change", e => {
+    if (e.target.matches("input[type=checkbox]")) {
+      const v = e.target.value;
+      if (e.target.checked) stateSet.add(v); else stateSet.delete(v);
+      if (chipsEl) paint();
+      render();
+      syncHash();
+    }
+  });
+  if (chipsEl) {
+    chipsEl.addEventListener("click", e => {
+      const btn = e.target.closest("button[data-v]");
+      if (!btn) return;
+      stateSet.delete(btn.dataset.v);
+      paint();
+      render();
+      syncHash();
+    });
+  }
+  paint();
+  return paint;
+}
+
+function bindMultiFilter() {
+  document.querySelectorAll(".multi-filter").forEach(input => {
+    const target = document.getElementById(input.dataset.target);
+    input.addEventListener("input", () => {
+      const q = input.value.toLowerCase();
+      target.querySelectorAll(".multi-row").forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    });
+  });
+}
+
+const repaint = {};
+
+function bind() {
+  const fields = {
+    q: "q", board: "board", grade: "grade", list: "list",
+    low: "low", high: "high", sort: "sort", dir: "dir",
+  };
+  for (const [key, id] of Object.entries(fields)) {
+    const el = document.getElementById(id);
+    el.addEventListener("input",  () => { state[key] = el.value; render(); syncHash(); });
+    el.addEventListener("change", () => { state[key] = el.value; render(); syncHash(); });
+  }
+  document.getElementById("rangeOn").addEventListener("change", e => {
+    state.rangeOn = e.target.checked; render(); syncHash();
+  });
+  document.getElementById("reset").addEventListener("click", () => {
+    Object.assign(state, {
+      q:"", board:"", grade:"", list:"",
+      rangeOn:false, low:"", high:"",
+      sort:"title", dir:"asc",
+      maxWidth:"", loMin:"", hiMax:"", hasRange:false,
+    });
+    state.composers.clear(); state.listTitles.clear();
+    state.keys.clear(); state.langs.clear();
+    state.openIds.clear();
+    syncFromState();
+    render();
+    syncHash();
+  });
+
+  document.querySelector("#results tbody").addEventListener("click", e => {
+    const btn = e.target.closest("button.chev");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (state.openIds.has(id)) state.openIds.delete(id);
+    else state.openIds.add(id);
+    render();
+    syncHash();
+  });
+
+  // advanced numerics
+  for (const [key, id] of Object.entries({maxWidth:"advMaxWidth", loMin:"advLoMin", hiMax:"advHiMax"})) {
+    const el = document.getElementById(id);
+    el.addEventListener("input", () => { state[key] = el.value; render(); syncHash(); });
+  }
+  const hasRangeEl = document.getElementById("advHasRange");
+  hasRangeEl.addEventListener("change", () => { state.hasRange = hasRangeEl.checked; render(); syncHash(); });
+
+  // modal open/close
+  const dialog = document.getElementById("advanced");
+  document.getElementById("openAdv").addEventListener("click", () => dialog.showModal());
+  dialog.addEventListener("click", e => {
+    if (e.target === dialog) dialog.close();
+  });
+  document.getElementById("advClear").addEventListener("click", () => {
+    state.composers.clear(); state.listTitles.clear();
+    state.keys.clear(); state.langs.clear();
+    state.maxWidth = ""; state.loMin = ""; state.hiMax = ""; state.hasRange = false;
+    syncFromState();
+    render();
+    syncHash();
+  });
+
+  bindMultiFilter();
+}
+
+function syncFromState() {
+  for (const id of ["q","board","grade","list","low","high","sort","dir"]) {
+    document.getElementById(id).value = state[id] || "";
+  }
+  document.getElementById("rangeOn").checked = state.rangeOn;
+  document.getElementById("advMaxWidth").value = state.maxWidth;
+  document.getElementById("advLoMin").value = state.loMin;
+  document.getElementById("advHiMax").value = state.hiMax;
+  document.getElementById("advHasRange").checked = state.hasRange;
+  for (const fn of Object.values(repaint)) fn();
+}
+
+// ---------- URL hash sync ----------
+function encodeSet(s) { return Array.from(s).join("|"); }
+function fillSet(s, v) {
+  s.clear();
+  if (!v) return;
+  for (const x of v.split("|")) if (x) s.add(x);
+}
+
+function syncHash() {
+  const params = new URLSearchParams();
+  for (const k of ["q","board","grade","list","low","high","sort","dir","maxWidth","loMin","hiMax"]) {
+    if (state[k]) params.set(k, state[k]);
+  }
+  if (state.rangeOn)  params.set("fits", "1");
+  if (state.hasRange) params.set("hasRange", "1");
+  if (state.composers.size)  params.set("composers",  encodeSet(state.composers));
+  if (state.listTitles.size) params.set("listTitles", encodeSet(state.listTitles));
+  if (state.keys.size)       params.set("keys",       encodeSet(state.keys));
+  if (state.langs.size)      params.set("langs",      encodeSet(state.langs));
+  if (state.openIds.size)    params.set("open",       encodeSet(state.openIds));
+  const h = params.toString();
+  history.replaceState(null, "", h ? "#" + h : location.pathname);
+}
+function loadHash() {
+  if (!location.hash) return;
+  const params = new URLSearchParams(location.hash.slice(1));
+  for (const k of ["q","board","grade","list","low","high","sort","dir","maxWidth","loMin","hiMax"]) {
+    if (params.has(k)) state[k] = params.get(k);
+  }
+  state.rangeOn  = params.get("fits") === "1";
+  state.hasRange = params.get("hasRange") === "1";
+  fillSet(state.composers,  params.get("composers"));
+  fillSet(state.listTitles, params.get("listTitles"));
+  fillSet(state.keys,       params.get("keys"));
+  fillSet(state.langs,      params.get("langs"));
+  fillSet(state.openIds,    params.get("open"));
+}
+
+// ---------- init ----------
+populateListOptions();
+repaint.composer  = buildMulti("advComposer",  COMPOSERS,   state.composers,  {chipsId: "advComposerChips"});
+repaint.listTitle = buildMulti("advListTitle", LIST_TITLES, state.listTitles);
+repaint.key       = buildMulti("advKey",       KEYS,        state.keys);
+repaint.lang      = buildMulti("advLang",      LANGS,       state.langs);
+bind();
+loadHash();
+syncFromState();
+render();
+</script>
+</body>
+</html>
