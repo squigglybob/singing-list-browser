@@ -206,12 +206,21 @@ const state = {
   openIds: new Set(),
 };
 
+function titlesForList(letter) {
+  return uniqSorted(SONGS.filter(s => s.list === letter).map(s => s.list_title).filter(Boolean));
+}
+function lettersForTitle(title) {
+  return uniqSorted(SONGS.filter(s => s.list_title === title).map(s => s.list).filter(Boolean));
+}
+
 function populateListOptions() {
   const sel = document.getElementById("list");
   const lists = uniqSorted(SONGS.map(s => s.list).filter(Boolean));
   for (const l of lists) {
+    const titles = titlesForList(l);
     const o = document.createElement("option");
-    o.value = l; o.textContent = l;
+    o.value = l;
+    o.textContent = titles.length ? `${l} — ${titles.join(" / ")}` : l;
     sel.appendChild(o);
   }
 }
@@ -404,14 +413,16 @@ function updateAdvBadge() {
 function buildMulti(targetId, items, stateSet, opts = {}) {
   const root = document.getElementById(targetId);
   const chipsEl = opts.chipsId ? document.getElementById(opts.chipsId) : null;
+  const labelOf = opts.labelOf || (v => v);
   function paint() {
     root.innerHTML = items.map(v => {
       const checked = stateSet.has(v) ? " checked" : "";
-      return `<label class="multi-row"><input type="checkbox" value="${esc(v)}"${checked}> ${esc(v) || "<em>(blank)</em>"}</label>`;
+      const lbl = labelOf(v);
+      return `<label class="multi-row"><input type="checkbox" value="${esc(v)}"${checked}> ${esc(lbl) || "<em>(blank)</em>"}</label>`;
     }).join("");
     if (chipsEl) {
       chipsEl.innerHTML = Array.from(stateSet).sort().map(v =>
-        `<span class="chip">${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="remove">×</button></span>`
+        `<span class="chip">${esc(labelOf(v))}<button type="button" data-v="${esc(v)}" aria-label="remove">×</button></span>`
       ).join("");
     }
   }
@@ -569,7 +580,12 @@ function loadHash() {
 // ---------- init ----------
 populateListOptions();
 repaint.composer  = buildMulti("advComposer",  COMPOSERS,   state.composers,  {chipsId: "advComposerChips"});
-repaint.listTitle = buildMulti("advListTitle", LIST_TITLES, state.listTitles);
+repaint.listTitle = buildMulti("advListTitle", LIST_TITLES, state.listTitles, {
+  labelOf: t => {
+    const ls = lettersForTitle(t);
+    return ls.length ? `${t} (${ls.join(", ")})` : t;
+  },
+});
 repaint.key       = buildMulti("advKey",       KEYS,        state.keys);
 repaint.lang      = buildMulti("advLang",      LANGS,       state.langs);
 bind();
