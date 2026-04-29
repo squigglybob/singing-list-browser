@@ -281,3 +281,36 @@ tbody tr.editions:nth-child(even) > td { background: #f9fbfd; } /* override row 
 .find-btn:hover { background: var(--row-alt); text-decoration: none; }
 
 .ed-empty { color: var(--muted); font-style: italic; font-size: .85rem; }
+.ed-meta {
+  font-size: .8rem;
+  color: var(--muted);
+  margin-bottom: .5rem;
+}
+
+@media (max-width: 720px) {
+  body { padding: .75rem; }
+  header h1 { font-size: 1.15rem; }
+  header .sub { font-size: .8rem; }
+
+  .controls { padding: .6rem .7rem; }
+  .controls .row { gap: .5rem; }
+  .controls label { font-size: .8rem; }
+  .controls label.grow { flex: 1 1 100%; min-width: 0; }
+  .controls input[type=text],
+  .controls input[type=search],
+  .controls select { padding: .4rem .5rem; font-size: 16px; } /* 16px prevents iOS zoom */
+
+  th, td { padding: .4rem .5rem; }
+  th { font-size: .7rem; }
+
+  .col-board, .col-grade, .col-keys { display: none; }
+
+  tr.editions > td { padding: .5rem .6rem .6rem 1.5rem; }
+  .editions-table { font-size: .8rem; display: block; overflow-x: auto; }
+  .editions-table thead, .editions-table tbody { display: table; width: 100%; }
+
+  dialog#advanced { width: calc(100% - 1rem); margin: .5rem auto; }
+  .adv { padding: .75rem; }
+  .adv-numeric { gap: .5rem; }
+  .multi { max-height: 7rem; }
+}

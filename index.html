@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>UK Singing Grades 7 &amp; 8 — Repertoire Browser</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -59,8 +60,9 @@
 <table id="results">
   <thead>
     <tr>
-      <th>Title</th><th>Composer</th><th>Board</th><th>Grade</th>
-      <th>List</th><th>Key(s)</th><th>Range</th>
+      <th>Title</th><th>Composer</th>
+      <th class="col-board">Board</th><th class="col-grade">Grade</th>
+      <th>List</th><th class="col-keys">Key(s)</th><th>Range</th>
       <th class="icon">▶</th>
     </tr>
   </thead>
@@ -367,14 +369,14 @@ function render() {
     const main = `<tr>
       <td>${chev} ${esc(r.title)}</td>
       <td>${esc(r.composer)}</td>
-      <td>${esc(r.board)}</td>
-      <td>${esc(r.grade)}</td>
+      <td class="col-board">${esc(r.board)}</td>
+      <td class="col-grade">${esc(r.grade)}</td>
       <td>${esc(r.list)}</td>
-      <td class="nowrap">${esc(songKeys(r))}</td>
+      <td class="nowrap col-keys">${esc(songKeys(r))}</td>
       <td class="nowrap">${songRange(r)}</td>
       <td class="icon">${searchLink(`https://www.youtube.com/results?search_query=${q}`, "▶", "Search YouTube")}</td>
     </tr>`;
-    const detail = open ? `<tr class="editions"><td colspan="8">${renderEditions(r)}</td></tr>` : "";
+    const detail = open ? `<tr class="editions"><td colspan="8"><div class="ed-meta">${esc(r.board)} · Grade ${esc(r.grade)} · List ${esc(r.list)}</div>${renderEditions(r)}</td></tr>` : "";
     return main + detail;
   }).join("");
 
